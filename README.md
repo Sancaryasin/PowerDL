@@ -243,8 +243,4 @@ MIT License
 
 ---
 
-## Citation
-
-If you use PowerDL in your work, please cite:
-
-> PowerDL: An In-Memory GPU Energy Profiling and Visualization Toolkit for Deep Learning Frameworks
+ 
