@@ -4,81 +4,116 @@ PowerDL is a lightweight, framework-agnostic toolkit for **GPU energy, power, an
 It supports **PyTorch and TensorFlow**, operates **fully in-memory by default**, and provides **rich, publication-ready visual analytics** with optional artifact export.
 
 The toolkit is designed for:
-- Interactive experimentation (no mandatory file I/O)
-- Energy-aware deep learning research
-- SoftwareX-style reproducible software contributions
+- Interactive experimentation (no mandatory file I/O)  
+- Energy-aware deep learning research  
+- Reproducible benchmarking  
+- Software-oriented scientific contributions  
 
 ---
 
 ## Key Features
 
-- PyTorch and TensorFlow support  
+- Unified high-level API: `profile_torch`, `profile_tf`  
 - Fully **in-memory profiling** (no files required by default)  
 - Optional export for reproducibility  
 - High-resolution **time-series sampling** (NVML-based)  
-- Rich, selectable **visual analytics**  
-- Uniform API across frameworks  
-- SoftwareX-ready outputs (figures + summaries)  
+- Phase-aware analysis (training / inference / warmup / session)  
+- Batch-level and epoch-level energy breakdown  
+- Optional visualization layer (installed separately)  
+- Clean separation between measurement and plotting  
+- Research-ready structured outputs (CSV + JSON)  
 
 ---
 
 ## Installation
 
-Clone the repository and install in editable mode:
+### Minimal Core Install (No Visualization)
 
 ```bash
-git clone https://github.com/your-repo/powerdl.git
-cd powerdl
-pip install -e .
+pip install powerdl
 ```
 
-### Requirements
-- Python ≥ 3.9  
-- NVIDIA GPU with NVML support  
-- PyTorch or TensorFlow  
-- numpy, pandas, matplotlib  
+### With Visualization Support
+
+```bash
+pip install powerdl[viz]
+```
+
+### With PyTorch Examples
+
+```bash
+pip install powerdl[examples-torch]
+```
+
+### With TensorFlow Examples
+
+```bash
+pip install powerdl[examples-tf]
+```
 
 ---
 
-## Quick Start
+## Requirements
 
-### PyTorch Example
+- Python ≥ 3.9  
+- NVIDIA GPU  
+- NVIDIA driver with NVML support  
+- PyTorch or TensorFlow (only if used)  
+
+Visualization dependencies are optional and not required for core functionality.
+
+---
+
+## Quick Start – PyTorch
 
 ```python
-from powerdl.highlevel_torch import profile_torch
+from powerdl.highlevel import profile_torch
 
-with profile_torch(out_dir=None, interval_s=0.02, verbose=1) as prof:
+with profile_torch(
+    out_dir=None,
+    interval_s=0.02,
+    verbose=1
+) as prof:
+
     prof.train(model, trainloader, optimizer, loss_fn, epochs=3)
     prof.infer_tensor(model, batch_size=256, n_samples=20000)
 
 rep = prof.report()
-rep.plot(all=True, out_dir="results/torch_figs")
+rep.export("results/torch_run")
 ```
 
-### TensorFlow Example
+---
+
+## Quick Start – TensorFlow
 
 ```python
 from powerdl.highlevel import profile_tf
 
-with profile_tf(out_dir=None, device_index=0, interval_s=0.02, verbose=1) as prof:
-    prof.fit(model, dataset, epochs=10)
+with profile_tf(
+    out_dir=None,
+    interval_s=0.02,
+    verbose=1
+) as prof:
+
+    prof.fit(model, dataset, epochs=3)
     prof.infer_keras(model, x_inf, batch_size=512)
 
 rep = prof.report()
-rep.plot(all=True, out_dir="results/tf_figs")
+rep.export("results/tf_run")
 ```
 
 ---
 
 ## In-Memory First Design
 
-PowerDL always collects measurements **in memory**:
+PowerDL always collects measurements **in memory first**.
 
+Collected signals:
 - GPU power (W)  
 - GPU utilization (%)  
 - Memory utilization (%)  
-- Time stamps  
-- Phase markers (training / inference / epochs)  
+- Precise timestamps  
+- Phase markers (training, inference, epochs, warmup)  
 
 No files are written unless explicitly requested.
 
@@ -92,25 +127,30 @@ rep.export("runs/experiment_export")
 
 ## Report Object
 
-After profiling, a unified `Report` object is returned:
+After profiling:
 
 ```python
 rep = prof.report()
 ```
 
-The report contains:
-- `samples` – time-series measurements  
-- `marks` – phase and event markers  
-- `summary` – aggregated scalar metrics  
+The unified `Report` object contains:
+- `samples_df` – full time-series measurements  
+- `marks_df` – event and phase markers  
+- `summary` – structured scalar metrics  
+
+Visualization is **lazy-loaded** and only requires matplotlib if plotting is requested.
 
 ---
 
-## Visualization System
+## Visualization System (Optional)
 
-PowerDL includes a **registry-based visualization system**.  
-Users can list, select, or generate all available figures.
+Install:
 
-### List Available Figures
+```bash
+pip install powerdl[viz]
+```
+
+List available figures:
 
 ```python
 rep.list_figures()
@@ -118,39 +158,32 @@ rep.list_figures()
 
 ---
 
-## Supported Figures (Complete List)
+## Supported Figures
 
 ### Time-Series
-- `power_time` – GPU power vs time (phase-shaded)  
-- `gpu_util_time` – GPU utilization vs time  
-- `mem_util_time` – memory utilization vs time  
-- `rolling_power` – smoothed power trace  
-- `rolling_util` – smoothed utilization trace  
-
-### Energy-Oriented
-- `cumulative_energy` – cumulative energy over time  
-- `energy_rate` – instantaneous energy rate  
-- `phase_energy_bar` – training vs inference energy breakdown  
-- `epoch_energy` – energy per epoch (if epoch markers exist)  
+- `power_time`
+- `gpu_util_time`
+- `mem_util_time`
+- `util_time_dual`
+- `energy_rate`
+- `power_derivative`
+- `cumulative_energy`
 
 ### Distribution-Based
-- `power_hist` – power histogram  
-- `util_hist` – utilization histogram  
-- `power_ecdf` – empirical CDF of power  
-- `util_ecdf` – empirical CDF of utilization  
+- `power_hist`
+- `util_hist`
+- `power_ecdf`
+- `util_ecdf`
 
 ### Phase-Aware Statistics
-- `power_boxplot_phase` – power by phase  
-- `util_boxplot_phase` – utilization by phase  
-- `phase_time_bar` – time spent per phase  
+- `power_boxplot_phase`
+- `util_boxplot_phase`
+- `phase_energy_bar`
+- `phase_time_bar`
 
 ### Correlation & Density
-- `power_util_scatter` – power vs GPU utilization  
-- `power_util_hexbin` – density-based power–utilization relation  
-
-### Throughput & Efficiency
-- `throughput_window` – instantaneous throughput  
-- `efficiency_curve` – energy–performance trade-off  
+- `power_util_scatter`
+- `power_util_hexbin`
 
 ---
 
@@ -159,10 +192,16 @@ rep.list_figures()
 ### Plot All Figures
 
 ```python
-rep.plot(all=True, out_dir="results/figs", show=False)
+rep.plot(
+    all=True,
+    out_dir="results/figs",
+    show=False,
+    smooth=5,
+    shade_phases=True
+)
 ```
 
-### Plot Selected Figures Only
+### Plot Selected Figures
 
 ```python
 rep.plot(
@@ -173,9 +212,7 @@ rep.plot(
         "phase_energy_bar"
     ],
     out_dir="results/figs",
-    show=True,
-    smooth=5,
-    shade_phases=True
+    show=True
 )
 ```
 
@@ -185,55 +222,75 @@ rep.plot(
 rep.plot_one("power_ecdf", show=True)
 ```
 
----
-
-## Visual Quality
-
-All figures are:
-- Consistently sized  
-- Grid-aligned with clean axes  
-- Top/right spines removed  
-- Publication-ready  
-- Saved as **PNG and PDF**  
+Figures are consistently formatted, publication-ready, and phase-aware where applicable.
 
 ---
 
-## Exported Artifacts (Optional)
+## Exported Artifacts
 
 ```python
 rep.export("runs/experiment_01")
 ```
 
 Produces:
-- `summary.json`  
-- `samples.csv`  
-- `marks.csv`  
-- `figures/*.png`  
-- `figures/*.pdf`  
+- `summary.json`
+- `samples.csv`
+- `marks.csv`
+- `batches.csv` (if batch profiling used)
+- `epochs.csv` (if epoch markers exist)
 
-This enables full reproducibility without enforcing disk I/O.
+This supports fully reproducible experiments.
 
 ---
 
-## Design Rationale (SoftwareX)
+## Advanced Features
+
+### Repeatability Experiments
+- Multi-run stability evaluation  
+- Median ± standard deviation reporting  
+- Coefficient of variation (CV%) analysis  
+- Sampling interval sensitivity testing  
+
+### Memory Safety
+- Optional memory warning thresholds  
+- Configurable sample buffer limits  
+- Auto-flush support for long experiments  
+
+### Framework-Agnostic Architecture
+Core measurement layer is independent of:
+- PyTorch  
+- TensorFlow  
+- Matplotlib  
+
+Optional dependencies are imported lazily.
+
+---
+
+## Design Philosophy
 
 PowerDL separates:
-- Measurement  
-- Analysis  
-- Visualization  
+- Measurement (NVML sampling)  
+- Aggregation (energy integration and phase pairing)  
+- Visualization (registry-based plotting)  
 
-It focuses on **temporal and phase-aware energy behavior**, rather than only scalar energy metrics.  
-The toolkit supports both interactive workflows and reproducible research.
+It focuses on **temporal and phase-aware energy behavior**, not just scalar totals.
+
+The architecture ensures:
+- Minimal overhead  
+- Clean packaging  
+- Optional visualization  
+- Reproducible research design  
 
 ---
 
 ## Typical Use Cases
 
-- Energy-aware deep learning research  
 - Green AI benchmarking  
 - Training vs inference energy comparison  
-- GPU efficiency and saturation analysis  
-- Software reproducibility studies  
+- GPU saturation analysis  
+- Phase-wise energy profiling  
+- Deep learning energy efficiency studies  
+- Software reproducibility experiments  
 
 ---
 
@@ -243,4 +300,8 @@ MIT License
 
 ---
 
- 
+## Author
+
+Yasin SANCAR  
+Computer Engineer  
+Energy-Aware Deep Learning Research
