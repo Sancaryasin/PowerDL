@@ -1,15 +1,26 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional, Tuple
+ 
 
-from pynvml import (
-    nvmlInit,
-    nvmlShutdown,
-    nvmlDeviceGetHandleByIndex,
-    nvmlDeviceGetPowerUsage,
-    nvmlDeviceGetName,
-    nvmlDeviceGetUtilizationRates,
-)
+# NVML bindings (use nvidia-ml-py package)
+try:
+    from pynvml import (  # provided by nvidia-ml-py
+        nvmlInit,
+        nvmlShutdown,
+        nvmlDeviceGetHandleByIndex,
+        nvmlDeviceGetName,
+        nvmlDeviceGetPowerUsage,
+        nvmlDeviceGetUtilizationRates,
+        nvmlDeviceGetMemoryInfo,
+        nvmlSystemGetDriverVersion,
+    )
+except Exception as e:
+    raise ImportError(
+        "NVML Python bindings not found. Install via: pip install nvidia-ml-py"
+    ) from e
+
+
 
 @dataclass
 class NvmlDevice:

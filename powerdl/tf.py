@@ -1,6 +1,9 @@
-from __future__ import annotations
-import tensorflow as tf
+from __future__ import annotations 
 from .analysis import integrate_joules, pair_marks
+
+
+import tensorflow as tf
+
 
 class PowerCallback(tf.keras.callbacks.Callback):
     def __init__(self, recorder: any):

@@ -1,27 +1,37 @@
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Tuple
 
-# Non-interactive backend (prevents GUI blocking)
-import matplotlib
-matplotlib.use("Agg")
-
-import matplotlib.pyplot as plt
 import numpy as np
-from matplotlib.ticker import FuncFormatter, MaxNLocator
 
-# SciencePlots (base look) + our colorful overrides
-import scienceplots  # noqa: F401
-plt.style.use(["science"])
+# --- Optional plotting deps (installed via: pip install powerdl[viz]) ---
+try:
+    import matplotlib
+    matplotlib.use("Agg")  # Non-interactive backend (prevents GUI blocking)
+    import matplotlib.pyplot as plt
+    from matplotlib.ticker import FuncFormatter, MaxNLocator
+except ImportError as e:
+    raise ImportError(
+        "Plotting requires optional dependencies. "
+        "Install with: pip install powerdl[viz]"
+    ) from e
+
+# SciencePlots (base look) - optional
+try:
+    import scienceplots   
+    plt.style.use(["science"])
+except Exception:
+    # Fallback: default Matplotlib style
+    pass
+
 
 def _set_percent_xlim(ax, x, *, pad=0.08, min_max=25, cap=100):
     """
-    x: 0-100 arası beklenen yüzde değerleri
-    - 0'ı her zaman göster
-    - sağ sınırı veriye göre büyüt (boşluk kalmasın)
-    - ama 100'ü zorla basma
+    x: expected percent values (0-100)
+    - always show 0
+    - expand right bound based on data (avoid too much empty space)
+    - but do not force 100
     """
     try:
         xmax = float(np.nanmax(x))
@@ -34,9 +44,10 @@ def _set_percent_xlim(ax, x, *, pad=0.08, min_max=25, cap=100):
         return
 
     right = xmax * (1.0 + pad)
-    right = max(right, float(min_max))      # aşırı dar olmasın
-    right = min(right, float(cap))          # 100'ü geçmesin
+    right = max(right, float(min_max))
+    right = min(right, float(cap))
     ax.set_xlim(0, right)
+
 
 # ---- Global "pro" visual defaults (colorful + clean) ----
 PRO_COLORS = {
@@ -88,11 +99,32 @@ plt.rcParams.update({
     "savefig.bbox": "tight",
 })
 
-# Modern color cycle (applies when multiple series)
 plt.rcParams["axes.prop_cycle"] = plt.cycler(color=[
     "#1f77b4", "#ff7f0e", "#2ca02c", "#d62728",
     "#9467bd", "#8c564b", "#e377c2", "#7f7f7f"
 ])
+
+
+# -------- labels (units) --------
+def _xlabel_time(ax):
+    ax.set_xlabel("Time (s)")
+
+
+def _ylabel_power(ax):
+    ax.set_ylabel("Power (W)")
+
+
+def _ylabel_energy(ax):
+    ax.set_ylabel("Energy (J)")
+
+
+def _ylabel_power_rate(ax):
+    # energy rate == power
+    ax.set_ylabel("Power (W)")
+
+
+def _ylabel_util(ax, what="GPU"):
+    ax.set_ylabel(f"{what} util (%)")
 
 
 @dataclass(frozen=True)
@@ -144,20 +176,23 @@ def _polish_axes(ax):
 
 
 def _add_phase_shading(ax, *, df, marks_df):
-    if marks_df is None or marks_df.empty or df.empty:
+    if marks_df is None or getattr(marks_df, "empty", True) or df.empty:
         return
     intervals = _phase_intervals(marks_df)
     if not intervals:
         return
 
     t0 = float(df["t"].min())
+
+    # freeze y-limits BEFORE annotation to avoid shifting
     y0, y1 = ax.get_ylim()
+    y_text = y1 - (y1 - y0) * 0.02  # slightly below top
 
     for phase, (a, b) in intervals.items():
         color = PRO_COLORS.get(phase, "#999999")
         ax.axvspan(a - t0, b - t0, alpha=0.08, color=color, lw=0)
         mid = (a + b) / 2.0 - t0
-        ax.text(mid, y1, phase, va="top", ha="center", fontsize=9, color="#333333", alpha=0.75)
+        ax.text(mid, y_text, phase, va="top", ha="center", fontsize=9, color="#333333", alpha=0.75)
 
     ax.set_ylim(y0, y1)
 
@@ -185,17 +220,20 @@ def plot_power_time(rep, ax, *, smooth: int = 0, shade_phases: bool = True, show
         ax.plot(x, y, linewidth=2.8, color=PRO_COLORS["infer"], label="power")
         series_for_stats = y
 
-    # Mean line + label
     try:
         m = float(series_for_stats.mean())
         ax.axhline(m, linestyle="--", linewidth=2.0, color=PRO_COLORS["mean"], alpha=0.9)
-        ax.text(0.99, m, f" mean={m:.1f} W", ha="right", va="bottom",
-                transform=ax.get_yaxis_transform(), color=PRO_COLORS["mean"], fontsize=10)
+        ax.text(
+            0.99, m, f" mean={m:.1f} W",
+            ha="right", va="bottom",
+            transform=ax.get_yaxis_transform(),
+            color=PRO_COLORS["mean"], fontsize=10
+        )
     except Exception:
         pass
 
-    ax.set_xlabel("Time (s)")
-    ax.set_ylabel("Power (W)")
+    _xlabel_time(ax)
+    _ylabel_power(ax)
     ax.yaxis.set_major_formatter(FuncFormatter(_fmt_thousands))
 
     if shade_phases:
@@ -218,15 +256,16 @@ def plot_cumulative_energy(rep, ax, shade_phases: bool = True, **_):
     e = np.cumsum(p * dt)
 
     ax.plot(df["ts"].astype(float), e, color=PRO_COLORS["session"], linewidth=3.0)
-    ax.set_xlabel("Time (s)")
-    ax.set_ylabel("Energy (J)")
+    _xlabel_time(ax)
+    _ylabel_energy(ax)
     ax.yaxis.set_major_formatter(FuncFormatter(_fmt_thousands))
 
-    # Endpoint annotation
     try:
         ax.scatter(df["ts"].iloc[-1], e[-1], s=35, color=PRO_COLORS["train"], zorder=5)
-        ax.text(df["ts"].iloc[-1], e[-1], f"  {e[-1]:,.1f} J",
-                va="center", ha="left", fontsize=10, color="#222222")
+        ax.text(
+            df["ts"].iloc[-1], e[-1], f"  {e[-1]:,.1f} J",
+            va="center", ha="left", fontsize=10, color="#222222"
+        )
     except Exception:
         pass
 
@@ -257,12 +296,13 @@ def plot_power_derivative(rep, ax, *, smooth: int = 0, **_):
 
     ax.plot(df["ts"].iloc[1:].astype(float), d, linewidth=2.4, color="#9467bd")
     ax.axhline(0.0, linewidth=1.5, color="#444444", alpha=0.6)
-    ax.set_xlabel("Time (s)")
+    _xlabel_time(ax)
     ax.set_ylabel("dPower/dt (W/s)")
     return True
 
 
 def plot_energy_rate(rep, ax, *, smooth: int = 0, shade_phases: bool = True, **_):
+    # NOTE: This plot is effectively power vs time (energy rate == power).
     df = rep.samples_df
     if df.empty or "p_w" not in df.columns:
         return False
@@ -280,27 +320,32 @@ def plot_energy_rate(rep, ax, *, smooth: int = 0, shade_phases: bool = True, **_
         ax.plot(x, p, linewidth=3.0, color=PRO_COLORS["infer"], label="power")
         base = p
 
-    # Quantile band
     try:
         q10 = float(p.quantile(0.10))
         q90 = float(p.quantile(0.90))
         ax.axhspan(q10, q90, alpha=0.10, color=PRO_COLORS["band"], lw=0)
-        ax.text(0.01, 0.97, "10–90% band", transform=ax.transAxes,
-                ha="left", va="top", fontsize=10, color="#333333")
+        ax.text(
+            0.01, 0.97, "10–90% band",
+            transform=ax.transAxes,
+            ha="left", va="top", fontsize=10, color="#333333"
+        )
     except Exception:
         pass
 
-    # Mean line
     try:
         m = float(base.mean())
         ax.axhline(m, linestyle="--", linewidth=2.0, color=PRO_COLORS["mean"], alpha=0.9)
-        ax.text(0.99, m, f" mean={m:.1f} W", ha="right", va="bottom",
-                transform=ax.get_yaxis_transform(), color=PRO_COLORS["mean"], fontsize=10)
+        ax.text(
+            0.99, m, f" mean={m:.1f} W",
+            ha="right", va="bottom",
+            transform=ax.get_yaxis_transform(),
+            color=PRO_COLORS["mean"], fontsize=10
+        )
     except Exception:
         pass
 
-    ax.set_xlabel("Time (s)")
-    ax.set_ylabel("Energy rate (J/s)")
+    _xlabel_time(ax)
+    _ylabel_power_rate(ax)
     ax.yaxis.set_major_formatter(FuncFormatter(_fmt_thousands))
 
     if shade_phases:
@@ -323,8 +368,8 @@ def plot_gpu_util_time(rep, ax, *, smooth: int = 0, **_):
         y = y.rolling(smooth, min_periods=1).mean()
 
     ax.plot(df["ts"].astype(float), y, color=PRO_COLORS["warmup"], linewidth=2.8)
-    ax.set_xlabel("Time (s)")
-    ax.set_ylabel("GPU util (%)")
+    _xlabel_time(ax)
+    _ylabel_util(ax, "GPU")
     ax.set_ylim(0, 100)
     return True
 
@@ -343,8 +388,8 @@ def plot_mem_util_time(rep, ax, *, smooth: int = 0, **_):
         y = y.rolling(smooth, min_periods=1).mean()
 
     ax.plot(df["ts"].astype(float), y, color="#2ca02c", linewidth=2.8)
-    ax.set_xlabel("Time (s)")
-    ax.set_ylabel("Mem util (%)")
+    _xlabel_time(ax)
+    _ylabel_util(ax, "Mem")
     ax.set_ylim(0, 100)
     return True
 
@@ -364,8 +409,8 @@ def plot_util_time_dual(rep, ax, *, smooth: int = 0, **_):
         g = g.rolling(smooth, min_periods=1).mean()
 
     ax.plot(df["ts"].astype(float), g, linewidth=2.8, color=PRO_COLORS["warmup"], label="GPU util")
-    ax.set_xlabel("Time (s)")
-    ax.set_ylabel("GPU util (%)")
+    _xlabel_time(ax)
+    _ylabel_util(ax, "GPU")
     ax.set_ylim(0, 100)
 
     if "mem_util" in df.columns:
@@ -398,11 +443,13 @@ def plot_power_hist(rep, ax, **_):
     ax.set_xlabel("Power (W)")
     ax.set_ylabel("Count")
 
-    # annotate median
     try:
         med = float(np.median(x))
         ax.axvline(med, linestyle="--", linewidth=2.0, color=PRO_COLORS["mean"], alpha=0.9)
-        ax.text(med, ax.get_ylim()[1], f" median={med:.1f} W", ha="left", va="top", fontsize=10, color=PRO_COLORS["mean"])
+        ax.text(
+            med, ax.get_ylim()[1], f" median={med:.1f} W",
+            ha="left", va="top", fontsize=10, color=PRO_COLORS["mean"]
+        )
     except Exception:
         pass
 
@@ -416,11 +463,11 @@ def plot_util_hist(rep, ax, **_):
 
     _polish_axes(ax)
 
-    s = df["gpu_util"].dropna().astype(float).values
-    if s.size == 0:
+    x = df["gpu_util"].dropna().astype(float).values
+    if x.size == 0:
         return False
 
-    ax.hist(s, bins=30, alpha=0.90, edgecolor="#222222", linewidth=0.6, color=PRO_COLORS["warmup"])
+    ax.hist(x, bins=30, alpha=0.90, edgecolor="#222222", linewidth=0.6, color=PRO_COLORS["warmup"])
     ax.set_xlabel("GPU util (%)")
     ax.set_ylabel("Count")
     _set_percent_xlim(ax, x, pad=0.10)
@@ -444,12 +491,14 @@ def plot_power_ecdf(rep, ax, **_):
     ax.plot(x, y, linewidth=3.0, color=PRO_COLORS["infer"])
     ax.fill_between(x, 0, y, alpha=0.06, color=PRO_COLORS["infer"])
 
-    # percentile markers
     for q, lab in [(0.5, "median"), (0.9, "p90")]:
         try:
             xv = float(np.quantile(x, q))
             ax.axvline(xv, linestyle="--", linewidth=2.0, color="#444444", alpha=0.7)
-            ax.text(xv, 0.02, f" {lab}={xv:.1f}", rotation=90, va="bottom", ha="left", fontsize=9, color="#333333")
+            ax.text(
+                xv, 0.02, f" {lab}={xv:.1f}",
+                rotation=90, va="bottom", ha="left", fontsize=9, color="#333333"
+            )
         except Exception:
             pass
 
@@ -494,16 +543,12 @@ def plot_power_util_scatter(rep, ax, **_):
     if s.empty:
         return False
 
-    ax.scatter(
-        s["gpu_util"].astype(float),
-        s["p_w"].astype(float),
-        s=18,
-        alpha=0.45,
-        edgecolors="none",
-        color="#9467bd",
-    )
+    x = s["gpu_util"].astype(float).to_numpy()
+    y = s["p_w"].astype(float).to_numpy()
+
+    ax.scatter(x, y, s=18, alpha=0.45, edgecolors="none", color="#9467bd")
     ax.set_xlabel("GPU util (%)")
-    ax.set_ylabel("Power (W)")
+    _ylabel_power(ax)
     _set_percent_xlim(ax, x, pad=0.10)
     return True
 
@@ -519,19 +564,15 @@ def plot_power_util_hexbin(rep, ax, **_):
     if s.empty:
         return False
 
-    hb = ax.hexbin(
-        s["gpu_util"].astype(float),
-        s["p_w"].astype(float),
-        gridsize=32,
-        mincnt=1,
-        linewidths=0.0,
-        alpha=0.95,
-    )
+    x = s["gpu_util"].astype(float).to_numpy()
+    y = s["p_w"].astype(float).to_numpy()
+
+    hb = ax.hexbin(x, y, gridsize=32, mincnt=1, linewidths=0.0, alpha=0.95)
     ax.set_xlabel("GPU util (%)")
-    ax.set_ylabel("Power (W)")
+    _ylabel_power(ax)
     _set_percent_xlim(ax, x, pad=0.10)
     try:
-        cb = plt.colorbar(hb, ax=ax, label="count")
+        cb = plt.colorbar(hb, ax=ax, label="Count")
         cb.outline.set_visible(False)
     except Exception:
         pass
@@ -563,13 +604,7 @@ def plot_power_boxplot_by_phase(rep, ax, **_):
     if not data:
         return False
 
-    bp = ax.boxplot(
-        data,
-        labels=labels,
-        showfliers=False,
-        patch_artist=True,
-        widths=0.55,
-    )
+    bp = ax.boxplot(data, labels=labels, showfliers=False, patch_artist=True, widths=0.55)
     for patch, c in zip(bp["boxes"], colors):
         patch.set_facecolor(c)
         patch.set_alpha(0.35)
@@ -581,7 +616,7 @@ def plot_power_boxplot_by_phase(rep, ax, **_):
             line.set_color("#222222")
             line.set_linewidth(1.6)
 
-    ax.set_ylabel("Power (W)")
+    _ylabel_power(ax)
     ax.yaxis.set_major_formatter(FuncFormatter(_fmt_thousands))
     return True
 
@@ -611,13 +646,7 @@ def plot_util_boxplot_by_phase(rep, ax, **_):
     if not data:
         return False
 
-    bp = ax.boxplot(
-        data,
-        labels=labels,
-        showfliers=False,
-        patch_artist=True,
-        widths=0.55,
-    )
+    bp = ax.boxplot(data, labels=labels, showfliers=False, patch_artist=True, widths=0.55)
     for patch, c in zip(bp["boxes"], colors):
         patch.set_facecolor(c)
         patch.set_alpha(0.35)
@@ -629,13 +658,12 @@ def plot_util_boxplot_by_phase(rep, ax, **_):
             line.set_color("#222222")
             line.set_linewidth(1.6)
 
-    ax.set_ylabel("GPU util (%)")
+    _ylabel_util(ax, "GPU")
     ax.set_ylim(0, 100)
     return True
 
 
 def plot_phase_energy_bar(rep, ax, **_):
-    """Professional phase energy bar with annotations and mini-summary."""
     s = rep.summary or {}
     train_e = _safe_float(s.get("train_energy_j"))
     infer_e = _safe_float(s.get("infer_energy_j"))
@@ -654,12 +682,16 @@ def plot_phase_energy_bar(rep, ax, **_):
     ax.set_ylim(0, vmax * 1.22 if vmax > 0 else 1.0)
 
     colors = [PRO_COLORS["train"], PRO_COLORS["infer"]]
-    bars = ax.bar(labels, values, color=colors, width=0.55, edgecolor="#222222", linewidth=0.9, alpha=0.92, zorder=3)
+    bars = ax.bar(
+        labels, values,
+        color=colors, width=0.55,
+        edgecolor="#222222", linewidth=0.9,
+        alpha=0.92, zorder=3
+    )
 
-    ax.set_ylabel("Energy (J)")
+    _ylabel_energy(ax)
     ax.yaxis.set_major_formatter(FuncFormatter(_fmt_thousands))
 
-    # Value + percentage labels
     for bar, v in zip(bars, values):
         if v <= 0:
             txt = "n/a"
@@ -670,14 +702,10 @@ def plot_phase_energy_bar(rep, ax, **_):
             bar.get_x() + bar.get_width() / 2,
             bar.get_height() + vmax * 0.035,
             txt,
-            ha="center",
-            va="bottom",
-            fontsize=10,
-            fontweight="bold",
-            color="#111111",
+            ha="center", va="bottom",
+            fontsize=10, fontweight="bold", color="#111111"
         )
 
-    # Mini summary line
     if train_e is not None and infer_e is not None and infer_e > 0:
         ratio = train_e / infer_e
         subtitle = f"Total: {total:,.1f} J   |   Train/Infer: {ratio:.2f}×"
@@ -688,8 +716,7 @@ def plot_phase_energy_bar(rep, ax, **_):
         0.5, 0.97, subtitle,
         transform=ax.transAxes,
         ha="center", va="top",
-        fontsize=10,
-        color="#333333",
+        fontsize=10, color="#333333"
     )
     return True
 
@@ -713,7 +740,12 @@ def plot_phase_time_bar(rep, ax, **_):
     ax.set_ylim(0, vmax * 1.22 if vmax > 0 else 1.0)
 
     colors = [PRO_COLORS["train"], PRO_COLORS["infer"]]
-    bars = ax.bar(labels, values, color=colors, width=0.55, edgecolor="#222222", linewidth=0.9, alpha=0.92, zorder=3)
+    bars = ax.bar(
+        labels, values,
+        color=colors, width=0.55,
+        edgecolor="#222222", linewidth=0.9,
+        alpha=0.92, zorder=3
+    )
 
     ax.set_ylabel("Time (s)")
     ax.yaxis.set_major_formatter(FuncFormatter(lambda x, _: f"{x:.1f}"))
@@ -724,19 +756,15 @@ def plot_phase_time_bar(rep, ax, **_):
             bar.get_x() + bar.get_width() / 2,
             bar.get_height() + vmax * 0.035,
             txt,
-            ha="center",
-            va="bottom",
-            fontsize=10,
-            fontweight="bold",
-            color="#111111",
+            ha="center", va="bottom",
+            fontsize=10, fontweight="bold", color="#111111"
         )
 
     ax.text(
-        0.5, 1.02, f"Total: {total:.2f} s",
+        0.5, 0.97, f"Total: {total:.2f} s",
         transform=ax.transAxes,
         ha="center", va="top",
-        fontsize=10,
-        color="#333333",
+        fontsize=10, color="#333333"
     )
     return True
 
