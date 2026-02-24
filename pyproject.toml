@@ -1,10 +1,49 @@
 [build-system]
-requires = ["setuptools>=61"]
+requires = ["setuptools>=61", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "powerdl"
 version = "0.1.0"
 description = "Framework-agnostic power and energy profiling toolkit for deep learning"
-authors = [{name = "Your Name"}]
-dependencies = ["pynvml", "pandas"]
+authors = [{name = "Yasin SANCAR"}]
+requires-python = ">=3.9"
+dependencies = [
+  "nvidia-ml-py",
+  "pandas",
+]
+
+[project.optional-dependencies]
+viz = [
+  "matplotlib",
+  "SciencePlots",
+]
+
+examples-torch = [
+  "torch",
+  "torchvision",
+  "matplotlib",
+  "SciencePlots",
+]
+
+examples-tf = [
+  "tensorflow",
+  "matplotlib",
+  "SciencePlots",
+]
+
+examples = [
+  "torch",
+  "torchvision",
+  "tensorflow",
+  "matplotlib",
+  "SciencePlots",
+]
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["powerdl*"]
+exclude = ["data*", "examples*", "results*", "runs*", "notebooks*", "tests*"]
